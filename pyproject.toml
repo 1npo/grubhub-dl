@@ -1,0 +1,16 @@
+[project]
+name = "grubhub-dl"
+version = "0.1.0"
+description = "A CLI tool that extracts data from your emails about your Grubhub orders, and exports it in various formats."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["*"]
+exclude = [""]
+namespaces = true
+
+[project.scripts]
+grubhub-dl = "grubhub_dl.main:main"
