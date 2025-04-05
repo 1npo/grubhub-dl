@@ -19,6 +19,9 @@ def validate_enum(name: str, enum_type: EnumType) -> Enum:
         otherwise None
     """
 
+    if name is None:
+        return None
+
     if not isinstance(enum_type, EnumType):
         logger.error(
             ('Can only validate an enumeration, but a %s was provided. This is '
@@ -28,16 +31,16 @@ def validate_enum(name: str, enum_type: EnumType) -> Enum:
         logger.error(ERROR_MESSAGE_FATAL)
         exit(1)
 
-    # The user should be able to use dashes instead of underscores when providing a
-    # Destination type, eg "json-file" instead of "json_file".
-    if isinstance(enum_type, models.Destination):
-        name = name.replace('-', '_')
-    
     if isinstance(name, str):
+        # The user should be able to use dashes instead of underscores when providing a
+        # Destination type, eg "json-file" instead of "json_file".
+        if enum_type == models.Destination:
+            name = name.replace('-', '_')
+        
         try:
             return enum_type[name]
         except KeyError:
-            pass
+            logger.debug('Item "%s" not found in enumeration %s', name, enum_type)
 
     if enum_type == models.Source:
         logger.error(

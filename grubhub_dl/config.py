@@ -1,119 +1,70 @@
 """Saves parameters to, and loads parameters from, INI configuration files.
 """
 
-import os
 import logging
 import configparser
-import typing as t
 
-from grubhub_dl import models
+from grubhub_dl import (
+    models,
+    __appname__,
+	DEFAULT_SOURCE,
+    DEFAULT_DESTINATION,
+	DEFAULT_CACHE_DIR,
+	DEFAULT_KEYRING_SERVICE,
+	DEFAULT_KEYRING_USERNAME,
+	DEFAULT_DATETIME_FORMAT,
+)
+
+from grubhub_dl.validation import validate_enum
 
 logger = logging.getLogger(__name__)
 
 
-class ConfigManager():
-	"""Provides a
-	"""
+def config_to_params(config_file: str) -> models.Parameters:
+	config = configparser.ConfigParser()
 
-	def __init__(self, config_path: str = None):
-		"""Load the settings from the user's configuration file, if it exists, and get the
-		path to the module that's initializing a ConfigManager"""
+	try:
+		config.read(config_file)
+	except configparser.ParsingError:
+		logger.error('Unable to parse configuration file "%s": %s')
+		exit(1)
 
-		if config_path is not None:
-			self.config_path = config_path
-		else:
-			self.config_path = os.path.expandvars(DEFAULT_CONFIG_PATH)
-		
-		self._load_settings()
+	if __appname__ not in config:
+		logger.error(
+			'Unable to get configuration. Expected section "%s" not found in file "%s".',
+			__appname__,
+			config_file
+		)
+		exit(1)
 
-	def _load_settings(self):
-		"""Load the user's configuration from file"""
-		self.config = configparser.ConfigParser()
-		self.config.read(self.config_path)
+	try:
+		params = models.Parameters(**dict(config.items(__appname__)))
+	except TypeError as err:
+		logger.error(
+			'Unable to load parameters from configuration file "%s": %s',
+			config_file,
+			err
+		)
+		exit(1)
+
+	# For parameters whose values are enums, we need to convert the string value of the
+	# enum item to the actual Enum object.
+	params.source = validate_enum(params.source, models.Source)
+	params.destination = validate_enum(params.destination, models.Destination)
+
+	# Ensure that default values are set on any parameters that have default values but
+	# were not provided in the user's config file.
+	fields_with_defaults = {
+		'source':			DEFAULT_SOURCE,
+		'destination':		DEFAULT_DESTINATION,
+		'cache_dir':		DEFAULT_CACHE_DIR,
+		'keyring_service':	DEFAULT_KEYRING_SERVICE,
+		'keyring_username':	DEFAULT_KEYRING_USERNAME,
+		'datetime_format':	DEFAULT_DATETIME_FORMAT,
+	}
+	for field, default in fields_with_defaults.items():
+		if getattr(params, field) is None:
+			setattr(params, field, default)
 	
-	def _save_settings(self):
-		"""Write the user's configuration to file"""
-		with open(self.config_path, 'w') as config_file:
-			self.config.write(config_file)
-
-	def params_to_config(self, models.Parameters):
-		pass
-
-
-	def config_to_params(self) -> models.Parameters:
-		pass
-
-	def get_setting(
-		self,
-		setting_name: str,
-		*,
-		title: str = None,
-		ask_type: str = 'file',
-		always_ask: bool = False,
-		dont_save: bool = False,
-		required: bool = True
-	) -> t.Union[str, None]:
-		"""Get the value of a setting from the configuration file, or ask the user to
-		provide the value
-
-		The configuration file is divided into sections -- one section for each plugin
-		that chooses to leverage ConfigManager. So ``setting_name`` will always be scoped
-		to that plugin. For example, the plugins "test_alice" and "test_bob" can both have
-		a setting named "input_file" with different values:
-
-		.. code-block:: ini
-
-			[pipelines.reports.test_alice]
-			input_file = C:/Users/nickolas.omalley/Downloads/excel_report_alice.xlsx
-
-			[pipelines.reports.test_bob]
-			input_file = C:/Users/nickolas.omalley/Downloads/excel_report_bob.xlsx
-		
-		:param setting_name: The name of the setting in the configuration file that you
-			want to get the value of. If the setting doesn't exist, the user will be asked
-			to provide a value. The given value will be saved to this setting in the
-			user's configuration file, unless dont_save is True.
-		:param title: The string to use as the input() or titlebar message when asking the
-			user to provide a value for setting_name.
-		:param ask_type: How to ask the user for a value. Options are 'file' (tkinter
-			askfiledialog), 'dir' (tkinter askdirectory), or 'input' (built-in input()
-			function. (default: 'file')
-		:param always_ask: Always ask the user to provide the value, even if it already
-			exists in the config file.
-		:param dont_save: If True, don't save the user-provided value back to the config
-			file. (default: False)
-		:param required: A value must be provided. If setting_name isn't found in the
-			config file, and the user fails to provide a non-blank value, raise an error.
-			(default: True)
-		"""
-		
-		setting_value = None
-		valid_ask_types = ['input', 'file', 'dir']
-
-		if ask_type not in valid_ask_types:
-			raise ValueError(
-				('ConfigManager.get_setting only supports these values for the ask_type '
-	 			f'parameter: {", ".join(valid_ask_types)}, but {ask_type} was provided')
-			)
-
-		if not title:
-			title = f'Please select the "{setting_name}" file or folder'
-		
-		if self.mod_name_full not in self.config:
-			self.config[self.mod_name_full] = {}
-
-		if always_ask or setting_name not in self.config[self.mod_name_full]:
-			if ask_type == 'input':
-				setting_value = self.ask_input(title, required)
-			else:
-				setting_value = self.ask_input_tk(title, required, ask_type=ask_type)
-
-		if not always_ask and setting_name in self.config[self.mod_name_full]:
-			setting_value = self.config[self.mod_name_full][setting_name]
-
-		if not dont_save:
-			if setting_value:
-				self.config[self.mod_name_full][setting_name] = setting_value
-			self._save_settings()
-		
-		return setting_value
+	logger.debug('Got parameters from config file "%s": %s', config_file, params)
+	return params

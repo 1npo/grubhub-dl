@@ -1,39 +1,36 @@
-"""Parses user arguments and executes the app's logic. The entrypoint for ``grubhub-dl``.
-
-Parameters can be provided as command-line arguments or by configuration file.
-
-If no CLI arguments are provided, parameters will be retrieved from this file, if it
-exists: ``~/.config/grubhub-dl/grubhub-dl.ini``.
-
-If CLI arguments are provided, the configuration file will be ignored.
+"""Parses user arguments and runs the app's logic. The entrypoint for ``grubhub-dl``.
 
 Dependencies
 ============
 - pandas
 """
 
-__version__ = '0.1.0'
-__appname__ = 'grubhub-dl'
-
 import os
-import time
 import sys
 import argparse
 import logging
+import pprint
+from dataclasses import asdict
+from datetime import datetime, timedelta
 
 import pandas as pd
 
 from grubhub_dl import (
-    extract,
-    export,
+    process,
     models,
+    config,
+    __version__,
+    __appname__,
+    DEFAULT_SOURCE,
+    DEFAULT_DESTINATION,
     DEFAULT_CACHE_DIR,
-    DEFAULT_CONFIG_FILE,
     DEFAULT_KEYRING_SERVICE,
     DEFAULT_KEYRING_USERNAME,
     DEFAULT_DATETIME_FORMAT,
     ERROR_MESSAGE_FATAL,
 )
+
+from grubhub_dl.export import export
 from grubhub_dl.validation import validate_enum
 from grubhub_dl.emails import cache, gmail
 
@@ -46,7 +43,7 @@ logging.basicConfig(
 
 
 def get_grubhub_data(params: models.Parameters) -> pd.DataFrame | None:
-    """Execute the app's logic
+    """Run the app's logic
 
     1. Get all Grubhub emails from the given source (cached JSON file or an email API)
     1. Categorize all the emails by the pattern of the subject line
@@ -59,16 +56,17 @@ def get_grubhub_data(params: models.Parameters) -> pd.DataFrame | None:
     :returns: A dataframe if the requested output format is a dataframe, otherwise None
     """
 
-    match params.import_from:
+    # Get email messages
+    match params.source:
         case models.Source.cache:
-            emails = cache.get_emails_from_cache(params)
+            emails = cache.json_files_to_emails(params)
         case models.Source.gmail:
             emails = gmail.get_emails_from_gmail_api(params)
-            export.cache_emails(params, emails)
+            cache.emails_to_json_files(params, emails)
         case _:
             logger.error(
                 'Unknown data source (%s). This is unexpected! Please report it!',
-                params.import_from
+                params.source
             )
             logger.error(ERROR_MESSAGE_FATAL)
             return None
@@ -77,9 +75,61 @@ def get_grubhub_data(params: models.Parameters) -> pd.DataFrame | None:
         logger.warning('No emails to extract data from. Quitting.')
         return None
 
-    grubhub_data = extract.get_data_from_emails(emails)
+    # Transform email messages into a list of dataclasses
+    grubhub_data = process.extract_data_from_emails(params, emails)
+    
+#    grubhub_data = {
+#        'emails':               [],
+#        'orders':               [],
+#        'order_items':          [],
+#        'order_updates':        [],
+#        'order_cancellations':  [],
+#        'credits':              [],
+#    }
 
-    match params.export_to:
+    records_emails = [asdict(r) for r in grubhub_data['emails']]
+    records_orders = [asdict(r) for r in grubhub_data['orders']]
+    records_order_items = [asdict(r) for r in grubhub_data['order_items']]
+    records_order_updates = [asdict(r) for r in grubhub_data['order_updates']]
+    records_order_cancellations = [asdict(r) for r in grubhub_data['order_cancellations']]
+    records_credits = [asdict(r) for r in grubhub_data['credits']]
+
+    df_emails = pd.DataFrame.from_dict(records_emails)
+    df_orders = pd.DataFrame.from_dict(records_orders)
+    df_order_items = pd.DataFrame.from_dict(records_order_items)
+    df_order_updates = pd.DataFrame.from_dict(records_order_updates)
+    df_order_cancellations = pd.DataFrame.from_dict(records_order_cancellations)
+    df_credits = pd.DataFrame.from_dict(records_credits)
+
+    orders_field_subset = [
+        'email_id',
+        'order_number',
+    ]
+    df_emails = df_emails.merge(df_orders[orders_field_subset], how='left', on='email_id')
+
+    emails_field_subset = [
+        'email_id',
+        'subject',
+        'category',
+        'cache_file',
+    ]
+    df_orders = df_orders.merge(df_emails[emails_field_subset], how='left', on='email_id')
+
+    today = datetime.now().strftime('%Y-%m-%d_%I%M%S%p')
+    output_dir = '/home/nick/grubhub_data_debug/'
+    debug_file = os.path.join(output_dir, f'grubhub_dl_debug_{today}.xlsx')
+    with pd.ExcelWriter(debug_file, engine='xlsxwriter') as writer:
+        df_emails.to_excel(writer, index=False, sheet_name='emails')
+        df_orders.to_excel(writer, index=False, sheet_name='orders')
+        df_order_items.to_excel(writer, index=False, sheet_name='order_items')
+        df_order_updates.to_excel(writer, index=False, sheet_name='order_updates')
+        df_order_cancellations.to_excel(writer, index=False, sheet_name='order_cancellations')
+        df_credits.to_excel(writer, index=False, sheet_name='credits')
+
+    #exit(0)
+
+    # Load the dataclasses
+    match params.destination:
         case models.Destination.json:
             export.grubhub_data_to_json(params, grubhub_data)
         case models.Destination.table:
@@ -106,9 +156,6 @@ def get_arguments(args: list = None) -> argparse.Namespace:
     """
 
     parser = argparse.ArgumentParser(prog=f'{__appname__} v{__version__}')
-
-    parser_action = parser.add_subparsers(dest='action')
-    parser_gmail = parser_action.add_parser('gmail', help='Get emails from the Gmail API')
     
     parser.add_argument(
         '--verbose',
@@ -116,23 +163,28 @@ def get_arguments(args: list = None) -> argparse.Namespace:
         help='Display more verbose debugging information in the output log'
     )
     parser.add_argument(
-        '--config',
+        '--config-file',
         metavar='FILE',
         action='store',
         type=str,
-        default=DEFAULT_CONFIG_FILE,
         help='Get parameters from this config file.'
     )
-
     parser.add_argument(
-        '--to',
+        '--source',
+        action='store',
+        type=lambda src: validate_enum(src, models.Source),
+        default=DEFAULT_SOURCE,
+        help='Get Grubhub data from this source'
+    )
+    parser.add_argument(
+        '--destination',
         action='store',
         type=lambda dest: validate_enum(dest, models.Destination),
-        default=models.Destination.json,
+        default=DEFAULT_DESTINATION,
         help='Export processed Grubhub data in this format'
     )
     parser.add_argument(
-        '--path',
+        '--output-path',
         metavar='PATH',
         action='store',
         type=str,
@@ -145,20 +197,18 @@ def get_arguments(args: list = None) -> argparse.Namespace:
         type=str,
         help='When exporting Grubhub data to SQLite, export it to the DB at this path'
     )
-
     parser.add_argument(
-        '--email',
+        '--email-address',
         action='store',
         type=str,
         help='Get Grubhub data from emails that were sent to this email address'
     )
     parser.add_argument(
-        '--email-creds',
+        '--email-creds-file',
         action='store',
         type=str,
         help='Get email API credentials from this file'
     )
-
     parser.add_argument(
         '--cache-dir',
         action='store',
@@ -203,67 +253,89 @@ def get_parameters(args: list) -> models.Parameters:
     namespace = get_arguments(args)
 
     if namespace.verbose:
-        logger.setLevel(logging.DEBUG)
+        logging.getLogger().setLevel(logging.DEBUG)
         logger.debug('Verbose log output enabled (log_level=DEBUG)')
 
-    params = models.Parameters(
-        source=models.Source.cache,
-        config_file=namespace.config,
-        destination=namespace.to,
-        output_path=namespace.path,
+    if namespace.config_file and os.path.exists(namespace.config_file):
+        params = config.config_to_params(namespace.config_file)
+        return params
+    
+    if namespace.source == models.Source.gmail:
+        if not namespace.email_address:
+            logger.error('An email address must be provided when the source is "gmail".')
+            exit(1)
+        if not namespace.email_creds_file:
+            logger.error(
+                ('A JSON file containing your credentials for accessing the Gmail API '
+                'must be provided when the source is "gmail".')
+            )
+            exit(1)
+    
+    if namespace.destination and 'file' in namespace.destination.name:
+        if not namespace.output_path:
+            logger.error(
+                'An output path must be specified when the destination is "%s"',
+                namespace.destination
+            )
+            exit(1)
+
+    return models.Parameters(
+        source=namespace.source,
+        config_file=namespace.config_file,
+        destination=namespace.destination,
+        output_path=namespace.output_path,
         sqlite_path=namespace.sqlite_path,
-        email_address=namespace.email,
-        email_creds_file=namespace.email_creds,
+        email_address=namespace.email_address,
+        email_creds_file=namespace.email_creds_file,
         cache_dir=namespace.cache_dir,
         keyring_service=namespace.keyring_service,
         keyring_username=namespace.keyring_username,
         datetime_format=namespace.datetime_format,
     )
 
-    if namespace.action:
-        if namespace.action == 'gmail':
-            params.source = models.Source.gmail
 
-
-
-
-
-    return params
+def get_runtime(duration: timedelta) -> str:
+    hours = duration.seconds // 3600
+    mins = (duration.seconds % 3600) // 60
+    secs = duration.seconds % 60
+    milisecs = int(f'{duration.microseconds}'[:-3])
+    return f'{hours:02d}h {mins:02d}m {secs:02d}s {milisecs}ms'
 
 
 def main(args: list = None):
-    start_time = time.time()
-
-    logger.info('Starting %s v%s', __appname__, __version__)
-
     df = None
-
+    
     try:
+        started_at = datetime.now()
         params = get_parameters(args)
 
-        logger.debug('source            = %s', params.source)
-        logger.debug('config_file       = %s', params.config_file)
-        logger.debug('destination       = %s', params.destination)
-        logger.debug('output_path       = %s', params.output_path)
-        logger.debug('sqlite_path       = %s', params.sqlite_path)
-        logger.debug('email_address     = %s', params.email_address)
-        logger.debug('email_creds_file  = %s', params.email_creds_file)
-        logger.debug('cache_dir         = %s', params.cache_dir)
-        logger.debug('keyring_service   = %s', params.keyring_service)
-        logger.debug('keyring_username  = %s', params.keyring_username)
-        logger.debug('datetime_format   = %s', params.datetime_format)
+        logger.info(
+            'Starting %s v%s with the following parameters:',
+            __appname__,
+            __version__
+        )
+        logger.info('source            = %s', params.source)
+        logger.info('config_file       = %s', params.config_file)
+        logger.info('destination       = %s', params.destination)
+        logger.info('output_path       = %s', params.output_path)
+        logger.info('sqlite_path       = %s', params.sqlite_path)
+        logger.info('email_address     = %s', params.email_address)
+        logger.info('email_creds_file  = %s', params.email_creds_file)
+        logger.info('cache_dir         = %s', params.cache_dir)
+        logger.info('keyring_service   = %s', params.keyring_service)
+        logger.info('keyring_username  = %s', params.keyring_username)
+        logger.info('datetime_format   = %s', params.datetime_format)
 
         df = get_grubhub_data(params)
 
     except KeyboardInterrupt:
         logger.warning('Received Ctrl-C from user. Quitting...')
 
-    end_time = (time.time() - start_time)
-    run_time = time.strftime('%Hh%Mm%Ss', time.gmtime(end_time))
+    duration = (datetime.now() - started_at)
 
-    logger.info('Finished in %s', run_time)
+    logger.info('Finished in %s', get_runtime(duration))
 
-    return df
+    return df or None
 
 
 if __name__ == '__main__':
