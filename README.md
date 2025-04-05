@@ -32,7 +32,7 @@ export GRUBHUB_EMAIL_DL_CREDENTIALS_FILE='path_to_your_credentials_file.json' gr
 ## Parameters
 ...
 
-## Install
+## Installation
 ```
 pip install --upgrade grubhub-email-dl
 ```
