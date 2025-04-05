@@ -13,6 +13,7 @@ class EmailCategory(Enum):
     order_confirmation = auto()
     order_canceled = auto()
     order_updated = auto()
+    uncategorized = auto()
 
 
 class CreditCategory(Enum):
@@ -24,12 +25,13 @@ class CreditCategory(Enum):
 
 @dataclass
 class EmailMessage:
-    id: str
+    email_id: str
     subject: str
     sent_by: str
     sent_at: datetime
     body: str
     category: EmailCategory = None
+    cache_file: str = None
 
 
 @dataclass
@@ -38,7 +40,9 @@ class OrderItem:
 
 
 @dataclass
-class OrderRefund:
+class OrderUpdate:
+    email_id: str = None
+    order_number: str = None
     refund_amount: str = None
     refund_item: str = None
     refund_reason: str = None
@@ -49,6 +53,7 @@ class OrderRefund:
 
 @dataclass
 class OrderCancellation:
+    email_id: str = None
     order_number: str = None
     amount: str = None
     reason: str = None
@@ -56,24 +61,31 @@ class OrderCancellation:
 
 @dataclass
 class Order:
+    email_id: str = None
     restaurant_name: str = None
     restaurant_phone: str = None
-    ordered_at: datetime
+    ordered_at: datetime = None
     order_number: str = None
     order_subtotal: str = None
     order_total: str = None
-    order_service_fee: str = None
-    order_delivery_fee: str = None
+    order_service_fee_original: str = None
+    order_service_fee_actual: str = None
+    order_delivery_fee_original: str = None
+    order_delivery_fee_actual: str = None
     order_sales_tax: str = None
     order_delivery_tip: str = None
-    order_items: list[OrderItem] = None
-    order_refund: OrderRefund = None
-    order_cancellation: OrderCancellation = None
+    order_payment_method: str = None
+    order_has_free_delivery: bool = None
+    order_has_promo_code: bool = None
+    order_items: list[str] = None
 
 
 @dataclass
 class Credit:
+    email_id: str = None
     amount: str = None
+    percent_off: int = None
+    percent_off_max_value: int = None
     code: str = None
     expires: datetime = None
     category: CreditCategory = None
