@@ -1,5 +1,14 @@
 """Extracts the data from Grubhub order update email bodies.
+
+Dependencies
+============
+- beautifulsoup4
 """
+
+from bs4 import BeautifulSoup
+
+from grubhub_dl import models
+
 
 # TODO: Find a way to eliminate the need for this helper function, if possible
 def reduce_order_update_lists(update_list: list) -> list:
@@ -26,9 +35,10 @@ def reduce_order_update_lists(update_list: list) -> list:
         return items
 
 
-def extract_order_update(row: pd.Series) -> pd.Series:
-    if row['category'] == 'order_updated':
-        soup = BeautifulSoup(row['body'], 'html.parser')
+def extract_order_updates(email: models.EmailMessage) -> models.OrderUpdate:
+    if email.category == models.EmailCategory.order_updated:
+        update = models.OrderUpdate(email_id=email.email_id)
+        soup = BeautifulSoup(email.body, 'html.parser')
 
         # TODO: Figure out a better and more reliable way to get the order update details
         items = []
@@ -44,14 +54,39 @@ def extract_order_update(row: pd.Series) -> pd.Series:
                 if row_text == 'Refund':
                     item_refunds.append(table.find_all('td')[i+1].text.strip())
                 if row_text == 'Fees & taxes':
-                    row['refund_fees_amount'] = table.find_all('td')[i+1].text.strip()
+                    update.refund_fees_amount = int(
+                        table
+                            .find_all('td')[i+1]
+                            .text
+                            .strip()
+                            .replace('$', '')
+                            .replace('.', '')
+                    )
                 if row_text == 'Adjusted tip':
-                    row['tip_adjusted_amount'] = table.find_all('td')[i+1].text.strip()
+                    update.tip_adjusted_amount = int(
+                        table
+                            .find_all('td')[i+1]
+                            .text
+                            .strip()
+                            .replace('$', '')
+                            .replace('.', '')
+                    )
                 if row_text in ('Refund total', 'Total refund'):
-                    row['refund_amount'] = table.find_all('td')[i+1].text.strip()
+                    update.refund_amount = int(
+                        table
+                            .find_all('td')[i+1]
+                            .text
+                            .strip()
+                            .replace('$', '')
+                            .replace('.', '')
+                    )
                 if 'Regarding order' in row_text:
-                    row['order_number'] = row_text.split('Regarding order ')[1].strip()
+                    update.order_number = (
+                        row_text.split('Regarding order ')[1].strip()
+                    )
         
+        return update
+
         # file_name = Path(row['file_path']).name
         # logger.debug('')
         # logger.debug('%s', '=' * (len(file_name) + 10))
@@ -69,4 +104,3 @@ def extract_order_update(row: pd.Series) -> pd.Series:
         # row['refund_item'] = reduce_order_update_lists(items)
         # row['refund_reason'] = reduce_order_update_lists(reasons)
         # row['refund_item_amount'] = reduce_order_update_lists(item_refunds)
-    return row

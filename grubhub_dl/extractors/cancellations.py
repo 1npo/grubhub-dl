@@ -1,4 +1,8 @@
 """Extracts the data from Grubhub order cancellations email bodies.
+
+Dependencies
+============
+- beautifulsoup4
 """
 
 import logging
@@ -11,19 +15,34 @@ logger = logging.getLogger(__name__)
 
 
 def extract_order_cancellation(email: models.EmailMessage) -> models.OrderCancellation:
+    """
+    """
+    
     if email.category == models.EmailCategory.order_canceled:
-        cancellation = models.OrderCancellation()
+        cancellation = models.OrderCancellation(email_id=email.email_id)
         soup = BeautifulSoup(email.body, 'html.parser')
         try:
             table = soup.find_all('table')[5].find_all('td')
             cancellation.order_number = table[1].text.strip()
-            cancellation.amount = table[5].text.strip()
+            cancellation.amount = int(
+                table[5]
+                    .text
+                    .strip()
+                    .replace('$', '')
+                    .replace('.', '')
+            )
             cancellation.reason = table[3].text.strip()
             return cancellation
         except Exception:
             table = soup.find_all('table')[3].find_all('td')
             cancellation.order_number = table[2].text.strip()
-            cancellation.amount = table[6].text.strip()
+            cancellation.amount = int(
+                table[6]
+                    .text
+                    .strip()
+                    .replace('$', '')
+                    .replace('.', '')
+            )
             cancellation.reason = table[4].text.strip()
             return cancellation
         except Exception as err:

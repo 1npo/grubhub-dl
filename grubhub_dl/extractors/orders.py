@@ -1,182 +1,424 @@
 """Extracts the data from Grubhub order confirmation email bodies.
+
+Dependencies
+============
+- beautifulsoup4
 """
 
 import logging
+from datetime import datetime
+from dataclasses import replace
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, element
 
 from grubhub_dl import models
 
 logger = logging.getLogger(__name__)
 
 
-# Example: Thanks for your Pho #1 Brighto_2021-11-02.095336PM.html
-def extract_order_confirmation_type_1(row: pd.Series) -> pd.Series:
-    if row['category'] == 'order_confirmation':
-        try:
-            row_restaurant_name = 7
-            row_order_total = 8
-            row_ordered_at = 9
-            row_order_number_and_phone = 10
-            row_order_items_start = 13
-            soup = BeautifulSoup(row['body'], 'html.parser')
-            table = soup.find_all('table')[1].find_all('td')
-            row['restaurant_name'] = table[row_restaurant_name].text.strip()
-            row['order_total'] = table[row_order_total].text.split(':')[1].strip()
+# Needed fields
+# [x] email_id
+# [x] restaurant_name
+# [x] restaurant_phone
+# [x] ordered_at
+# [x] order_number
+# [x] order_subtotal
+# [x] order_total
+# [x] order_service_fee_original
+# [x] order_service_fee_actual
+# [x] order_delivery_fee
+# [x] order_sales_tax
+# [x] order_delivery_tip
+# [x] order_payment_method
+# [x] order_has_free_delivery
+# [x] order_has_promo_code
+# [ ] order_items
+# [ ] order_subtype
+# [ ] subject
+# [ ] category
+# [ ] cache_file
 
-            try:
-                row['ordered_at'] = table[row_ordered_at].text.split(':')[1].strip()
-            except Exception as err:
-                logger.error(
-                    'FAILED TO GET ordered_at !!! err=%s, row=%s, filepath=',
-                    err,
-                    row,
-                    row['file_path']
-                )
+def extract_order_payment_method_details(
+    soup: BeautifulSoup,
+    order: models.Order
+) -> models.Order:
+    """Try to extract the data for the following fields:
 
-            row['order_number'] = (
-                table[row_order_number_and_phone]
-                    .text
-                    .split(': ')[1]
-                    .split('  ')[1]
-            )
-            row['restaurant_phone'] = (
-                table[row_order_number_and_phone]
-                    .text
-                    .split(': ')[1]
-                    .split('  ')[2]
-            )
+    - order_payment_method
+    - order_has_free_delivery
+    - order_has_promo_code
+    """
 
-            item_counter = 0
-            item_counting_complete = False
-            items = []
-            items_buffer = []
-            for i in range(row_order_items_start, len(table)):
-                if 'Items subtotal' in table[i].text:
-                    row['order_subtotal'] = table[i+1].text.strip()
-                    item_counting_complete = True
-                if 'Service fee' in table[i].text:
-                    row['order_service_fee'] = table[i+1].text.strip()
-                if 'Sales tax' in table[i].text:
-                    row['order_sales_tax'] = table[i+1].text.strip()
-                if 'Tip' in table[i].text:
-                    row['order_delivery_tip'] = table[i+1].text.strip()
-                if 'Payment Method' in table[i].text and '$' in table[i].text:
-                    row['order_payment_method'] = table[i].text
-                if not item_counting_complete:
-                    if item_counter == 2:
-                        item_counter = 0
-                        items.append(items_buffer)
-                    else:
-                        item_counter += 1
-                        items_buffer.append(table[i].text.strip())
-            row['order_items'] = [tuple(item) for item in items]
+    try:
+        table = soup.find_all('table')[1].find_all('td')
+        for i in range(13, len(table)):
+            if 'Payment Method' in table[i].text and '$' in table[i].text:
+                payment_method_data = table[i].text
+
+                # TODO: Parse out payment method, card number, and charged amount
+                order.order_payment_method = payment_method_data
+
+                if any([
+                    'PROMO CODE' in payment_method_data.upper(),
+                    'REWARD' in payment_method_data.upper()
+                ]):
+                    order.order_has_promo_code = True
+                
+                if any([
+                    'GH+ $0 DELIVERY' in payment_method_data.upper(),
+                    'FREE DELIVERY' in payment_method_data.upper(),
+                ]):
+                    order.order_has_free_delivery = True
+        return order
+    except Exception:
+        pass
+
+    try:
+        pass
+    except Exception:
+        pass
+
+    try:
+        pass
+    except Exception:
+        pass
+
+    logger.debug('Failed to get payment method details from order confirmation email')
+    return order
+
+
+def extract_order_total(soup: BeautifulSoup, order: models.Order) -> models.Order:
+    """Try to extract the data for the ``order_total`` field.
+    """
+
+    try:
+        order_total = (
+            soup
+                .find_all('table')[1]
+                .find_all('td')[8]
+                .text
+                .split(':')[1]
+                .strip()
+                .replace('$', '')
+                .replace('.', '')
+        )
+        order.order_total = int(order_total)
+        return order
+    except Exception:
+        pass
+
+    try:
+        order_total = (
+            soup
+                .find_all('table')[15]
+                .find_all('td')[1]
+                .text
+                .strip()
+                .replace('$', '')
+                .replace('.', '')
+        )
+        order.order_total = int(order_total)
+        return order
+    except Exception:
+        pass
+
+    try:
+        order_total = (
+            soup
+                .find_all('table')[11]
+                .find_all('td')[1]
+                .text
+                .strip()
+                .replace('$', '')
+                .replace('.', '')
+        )
+        order.order_total = int(order_total)
+        return order
+    except Exception:
+        pass
     
-        except Exception as err:
-            logger.error('FAILED TO PROCESS ROW: confirmation_type_1 !!!')
-
-    # soup.find_all('table')[1].find_all('td')[2].text.replace('\xa0', '\n').split('\n')
-    return row
+    logger.debug('Failed to get "order_total" from order confirmation email')
+    return order
 
 
-# Example: Your order from Los Amigos is _2021-05-24.111324PM.html
-def extract_order_confirmation_type_2(row: pd.Series) -> pd.Series:
-    if row['category'] == 'order_confirmation' and 'Your order from ' in row['subject']:
-        try:
-            soup = BeautifulSoup(row['body'], 'html.parser')
-            
-            order_details = soup.find_all('table')[11].find_all('td')[0].text
-            row['order_number'] = order_details.split('#')[1].strip()
-            row['ordered_at'] = (
-                order_details.split('#')[0].split('Order Details')[1].strip()
-            )
-            row['order_total'] = soup.find_all('table')[15].find_all('td')[1].text.strip()
+def process_summary_lines(summary: element.ResultSet, start: int = 0) -> dict:
+    """Helper function used by ``extract_order_summary``
+    """
+    
+    summary_data = {}
+    for i in range(start, len(summary)):
+        line = summary[i].text
+        if 'items subtotal' in line.strip().lower():
+            summary_data['order_subtotal'] = summary[i+1].text.strip()
+        if 'delivery fee' in line.strip().lower():
+            value = summary[i+1].text.strip()
+            if value.count('$') == 2:
+                segments = value.split(' ')
+                summary_data['order_delivery_fee_original'] = segments[0]
+                summary_data['order_delivery_fee_actual'] = segments[-1]
+            else:
+                summary_data['order_delivery_fee_actual'] = value
+        if 'service fee' in line.strip().lower():
+            value = summary[i+1].text.strip()
+            if value.count('$') == 2:
+                segments = value.split(' ')
+                summary_data['order_service_fee_original'] = segments[0]
+                summary_data['order_service_fee_actual'] = segments[-1]
+            else:
+                summary_data['order_service_fee_actual'] = value
+        if 'sales tax' in line.strip().lower():
+            summary_data['order_sales_tax'] = summary[i+1].text.strip()
+        if 'tip' in line.strip().lower():
+            summary_data['order_delivery_tip'] = summary[i+1].text.strip()
+    
+    # logger.warning('summary_data=%s', summary_data)
+    return summary_data
 
-            row['restaurant_name'] = None
-            row['restaurant_phone'] = None
 
-            order_summary = soup.find_all('table')[14].find_all('td')
-            for i, line in enumerate(order_summary):
-                if line.strip() == 'Items subtotal':
-                    row['order_subtotal'] = order_summary[i+1].text.strip()
-                if line.strip() == 'Delivery fee':
-                    row['order_delivery_fee'] = order_summary[i+1].text.strip()
-                if line.strip() == 'Service fee':
-                    row['order_service_fee'] = order_summary[i+1].text.strip()
-                if line.strip() == 'Sales tax':
-                    row['order_sales_tax'] = order_summary[i+1].text.strip()
-                if line.strip() == 'Tip':
-                    row['order_delivery_tip'] = order_summary[i+1].text.strip()
+def add_summary_data_to_order(summary_data: dict, order: models.Order) -> models.Order:
+    """Helper function used by ``extract_order_summary``
+    """
+    #required_fields = [
+    #    'order_subtotal',
+    #    'order_delivery_fee_actual',
+    #    'order_delivery_tip',
+    #    'order_service_fee_actual',
+    #]
+    #for field in required_fields:
+    #    if field not in summary_data or not summary_data[field]:
+    #        raise KeyError
+    
+    for field in summary_data:
+        summary_data[field] = int(summary_data[field].replace('$', '').replace('.', ''))
+    
+    order = replace(order, **summary_data)
+    return order
+    
 
-            item_counter = 0
-            items = []
-            items_buffer = []
-            items_table = soup.find_all('table')[13].find_all('td')
-            for item in items_table:
-                item = item.text.strip()
-                item_counter += 1
-                if item_counter <= 3:
-                    items_buffer.append(item)
-                if item_counter == 3:
-                    item_counter = 0
-                    items.extend(items_buffer)
+def extract_order_summary(soup: BeautifulSoup, order: models.Order) -> models.Order:
+    """Try to extract the data for the following fields:
+    
+    - order_subtotal
+    - order_service_fee_original
+    - order_service_fee_actual
+    - order_delivery_fee
+    - order_sales_tax
+    - order_delivery_tip
+    """
 
-            row['order_items'] = items
-        except Exception as err:
-            logger.error('FAILED TO PROCESS ROW: confirmation_type_2 !!!')
-    return row
+    try:
+        summary = soup.find_all('table')[1].find_all('td')
+        summary_data = process_summary_lines(summary, start=13)
+        order = add_summary_data_to_order(summary_data, order)
+        return order
+    except Exception as err:
+        #logger.warning('EXTRACT SUMMARY: ATTEMPT 1 FAIL: %s', err)
+        pass
 
-# Example: Thanks for your Pho 1 Waltham _2025-03-05.094904PM.html
-def extract_order_confirmation_type_3(row: pd.Series) -> pd.Series:
-    # order_items
-    #   soup.find_all('table')[9].find_all('td')
-    if row['category'] == 'order_confirmation' and 'Thanks for your ' in row['subject']:
-        try:
-            soup = BeautifulSoup(row['body'], 'html.parser')
-            
-            order_details = soup.find_all('table')[6].find_all('td')
-            row['ordered_at'] = order_details[2].strip(':')[1].strip()
-            row['order_number'] = (
-                order_details[3]
-                    .text
-                    .split('Order number:')[1]
-                    .split('Contact Restaurant:')[1]
-                    .strip()
-            )
-            row['order_total'] = soup.find_all('table')[11].find_all('td')[1]
+    try:
+        summary = soup.find_all('table')[14].find_all('td')
+        summary_data = process_summary_lines(summary)
+        order = add_summary_data_to_order(summary_data, order)
+        return order
+    except Exception as err:
+        #logger.warning('EXTRACT SUMMARY: ATTEMPT 2 FAIL: %s', err)
+        pass
 
-            row['restaurant_name'] = order_details[0].text.strip()
-            row['restaurant_phone'] = (
-                order_details[3].text.split('Contact Restaurant:')[1].strip()
-            )
+    try:
+        summary = soup.find_all('table')[10].find_all('td')
+        summary_data = process_summary_lines(summary)
+        order = add_summary_data_to_order(summary_data, order)
+        return order
+    except Exception as err:
+        #logger.warning('EXTRACT SUMMARY: ATTEMPT 3 FAIL: %s', err)
+        pass
+    
+    logger.debug('Failed to get order summary fields from order confirmation email')
+    return order
 
-            order_summary = soup.find_all('table')[10].find_all('td')
-            for i, line in enumerate(order_summary):
-                if line.strip() == 'Items subtotal':
-                    row['order_subtotal'] = order_summary[i+1].text.strip()
-                if line.strip() == 'Delivery fee':
-                    row['order_delivery_fee'] = order_summary[i+1].text.strip()
-                if line.strip() == 'Service fee':
-                    row['order_service_fee'] = order_summary[i+1].text.strip()
-                if line.strip() == 'Sales tax':
-                    row['order_sales_tax'] = order_summary[i+1].text.strip()
-                if line.strip() == 'Tip':
-                    row['order_delivery_tip'] = order_summary[i+1].text.strip()
 
-            item_counter = 0
-            items = []
-            items_buffer = []
-            items_table = soup.find_all('table')[9].find_all('td')
-            for item in items_table:
-                item = item.text.strip()
-                item_counter += 1
-                if item_counter <= 3:
-                    items_buffer.append(item)
-                if item_counter == 4:
-                    item_counter = 0
-                    items.extend(items_buffer)
+def extract_restaurant_phone(soup: BeautifulSoup, order: models.Order) -> models.Order:
+    """Try to extract the data for the ``restaurant_phone`` field.
+    """
+    
+    try:
+        order.restaurant_phone = (
+            soup
+                .find_all('table')[1]
+                .find_all('td')[10]
+                .text
+                .split(': ')[2]
+                .strip()
+        )
+    except Exception:
+        pass
 
-            row['order_items'] = items
-        except Exception as err:
-            logger.error('FAILED TO PROCESS ROW: confirmation_type_2 !!!')
-    return row
+    try:
+        order.restaurant_phone = (
+            soup
+                .find_all('table')[6]
+                .find_all('td')[3]
+                .text
+                .split('Contact Restaurant:')[1]
+                .strip()
+        )
+    except Exception:
+        pass
+    
+    # TODO: Is a third method needed? Find out
+
+    logger.debug('Failed to get "restaurant_phone" from order confirmation email')
+    return order
+
+
+def extract_restaurant_name(soup: BeautifulSoup, order: models.Order) -> models.Order:
+    """Try to extract the data for the ``restaurant_name`` field.
+    """
+    
+    try:
+        order.restaurant_name = (
+            soup
+                .find_all('table')[1]
+                .find_all('td')[7]
+                .text
+                .strip()
+        )
+        return order
+    except Exception:
+        pass
+
+    try:
+        order.restaurant_name = (
+            soup
+                .find_all('table')[6]
+                .find_all('td')[0]
+                .text
+                .strip()
+        )
+    except Exception:
+        pass
+
+    # TODO: Is a third method needed? Find out
+
+    logger.debug('Failed to get "restaurant_name" from order confirmation email')
+    return order
+
+
+def extract_order_number(soup: BeautifulSoup, order: models.Order) -> models.Order:
+    """Try to extract the data for the ``order_number`` field.
+    """
+    
+    try:
+        order.order_number = (
+            soup
+                .find_all('table')[1]
+                .find_all('td')[10]
+                .text
+                .split(': ')[1]
+                .split('  ')[1]
+                .replace('#', '')
+                .strip()
+        )
+        return order
+    except Exception:
+        pass
+
+    try:
+        order.order_number = (
+            soup
+                .find_all('table')[11]
+                .find_all('td')[0]
+                .text
+                .split('#')[1]
+                .replace('#', '')
+                .strip()
+        )
+        return order
+    except Exception:
+        pass
+
+    try:
+        order.order_number = (
+            soup
+                .find_all('table')[6]
+                .find_all('td')[3]
+                .text
+                .split('Order number:')[1]
+                .split('Contact Restaurant:')[1]
+                .replace('#', '')
+                .strip()
+        )
+        return order
+    except Exception:
+        pass
+
+    logger.debug('Failed to get "order_number" from order confirmation email')
+    return order
+
+
+def extract_ordered_at(soup: BeautifulSoup, order: models.Order) -> models.Order:
+    """Try to extract the data for the ``ordered_at`` field.
+    """
+    
+    try:
+        value = (
+            soup
+                .find_all('table')[1]
+                .find_all('td')[9]
+                .text
+                .split('Ordered:')[1]
+                .strip()
+        )
+        order.ordered_at = datetime.strptime(value, '%b %d, %Y %I:%M:%S%p')
+        return order
+    except Exception:
+        pass
+
+    try:
+        value = (
+            soup
+                .find_all('table')[11]
+                .find_all('td')[0]
+                .text
+                .split('#')[0]
+                .split('Order Details')[1]
+                .strip()
+        )
+        order.ordered_at = datetime.strptime(value, '%b %d, %Y %I:%M:%S%p')
+        return order
+    except Exception:
+        pass
+
+    try:
+        value = (
+            soup
+                .find_all('table')[6]
+                .find_all('td')[2]
+                .split('Ordered:')[1]
+                .strip()
+        )
+        order.ordered_at = datetime.strptime(value, '%b %d, %Y %I:%M:%S%p')
+        return order
+    except Exception:
+        pass
+
+    logger.debug('Failed to get "ordered_at" from order confirmation email')
+    return order
+
+
+def extract_order_confirmation(email: models.EmailMessage) -> models.Order:
+    """
+    """
+
+    if email.category == models.EmailCategory.order_confirmation:
+        soup = BeautifulSoup(email.body, 'html.parser')
+        order = models.Order(email_id=email.email_id)
+        order = extract_ordered_at(soup, order)
+        order = extract_order_number(soup, order)
+        order = extract_restaurant_name(soup, order)
+        order = extract_restaurant_phone(soup, order)
+        order = extract_order_summary(soup, order)
+        order = extract_order_total(soup, order)
+        order = extract_order_payment_method_details(soup, order)
+        # order = extract_order_items(soup, order)
+        return order
