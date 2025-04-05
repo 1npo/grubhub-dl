@@ -32,11 +32,7 @@ export GRUBHUB_EMAIL_DL_CREDENTIALS_FILE='path_to_your_credentials_file.json' gr
 ## Parameters
 ...
 
-## Dependencies
-```console
-pip install --upgrade keyring beautifulsoup4 google-api-python-client
-    google-auth-oauthlib google-auth openpyxl pandas numpy
-```
+## Install
 ```
 pip install --upgrade grubhub-email-dl
 ```
