@@ -38,12 +38,13 @@ def get_gmail_service(params: models.Parameters) -> Resource:
     this module is run.
     """
 
-    creds_file = params.credentials_file
+    creds_file = params.email_creds_file
     creds = None
     token = keyring.get_password(DEFAULT_KEYRING_SERVICE, DEFAULT_KEYRING_USERNAME)
     if token:
         try:
             creds = Credentials.from_authorized_user_info(json.loads(token))
+            logger.info('Got Gmail API access token from keyring')
         except (ValueError, KeyError) as err:
             logger.warning('Unable to load cached credentials: %s', err)
 
@@ -145,14 +146,14 @@ def get_grubhub_email_contents(service: Resource, message_id: str):
                 .decode('utf-8')
         )
 
-    return models.EmailMessage(
-        id=message_id,
+    email = models.EmailMessage(
+        email_id=message_id,
         subject=subject,
         sent_by=sent_by,
         sent_at=sent_at,
         body=unescape(body) if body else body,
     )
-
+    return email
 
 def get_emails_from_gmail_api(params: models.Parameters) -> list:
     service = get_gmail_service(params)
@@ -169,5 +170,5 @@ def get_emails_from_gmail_api(params: models.Parameters) -> list:
             content.subject
         )
 
-    logger.info('Retrieved %s emails and cached them to a spreadsheet', len(emails))
+    logger.info('Retrieved %s emails from the Gmail API', len(emails))
     return emails
