@@ -1,4 +1,4 @@
-# grubhub-email-dl
+# grubhub-dl
 A CLI tool that extracts data from your email inbox about your Grubhub orders and credits and exports it.
 
 > [!NOTE]
@@ -19,14 +19,14 @@ A CLI tool that extracts data from your email inbox about your Grubhub orders an
 > - The payment method section of order confirmation emails is not being parsed
 
 ## Usage
-Provide the path to the JSON file containing your Gmail/Outlook API credentials with the `--credentials-file` flag. Or you can set the path in the `GRUBHUB_EMAIL_DL_CREDENTIALS_FILE` environment variable before running `grubhub-email-dl`.
+Provide the path to the JSON file containing your Gmail/Outlook API credentials with the `--credentials-file` flag. Or you can set the path in the `GRUBHUB_EMAIL_DL_CREDENTIALS_FILE` environment variable before running `grubhub-dl`.
 
 Example 1:
 ```console
-grubhub-email-dl --email 'your.email@gmail.com' --credentials-file 'path_to_your_credentials_file.json'
+grubhub-dl --email 'your.email@gmail.com' --credentials-file 'path_to_your_credentials_file.json'
 ```
 ```console
-export GRUBHUB_EMAIL_DL_CREDENTIALS_FILE='path_to_your_credentials_file.json' grubhub-email-dl --email 'your.email@gmail.com'
+export GRUBHUB_EMAIL_DL_CREDENTIALS_FILE='path_to_your_credentials_file.json' grubhub-dl --email 'your.email@gmail.com'
 ```
 
 ## Parameters
@@ -34,5 +34,5 @@ export GRUBHUB_EMAIL_DL_CREDENTIALS_FILE='path_to_your_credentials_file.json' gr
 
 ## Installation
 ```
-pip install --upgrade grubhub-email-dl
+pip install --upgrade grubhub-dl
 ```
