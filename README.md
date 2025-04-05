@@ -1,7 +1,8 @@
 # grubhub-email-dl
-A CLI tool that extracts data from your emails about your Grubhub orders, and exports it in various formats.
+A CLI tool that extracts data from your email inbox about your Grubhub orders and credits and exports it.
 
-Only Gmail is supported. Support for Outlook (via the Graph API) is planned.
+> [!NOTE]
+> Currently only Gmail is supported. Support for Outlook (via the Graph API) is planned.
 
 > [!IMPORTANT]
 > This module can only process Grubhub emails that have the following subject lines, and are formatted the way Grubhub formats them as of ``2025-3-8``.
@@ -12,6 +13,10 @@ Only Gmail is supported. Support for Outlook (via the Graph API) is planned.
 >   - You can now enjoy a discounted meal from Grubhub!
 >   - You're approved for a Grubhub Guarantee Perk
 >   - Enjoy $<N>.00 off your next Grubhub order
+
+> [!IMPORTANT]
+> Known issues:
+> - The payment method section of order confirmation emails is not being parsed
 
 ## Usage
 Provide the path to the JSON file containing your Gmail/Outlook API credentials with the `--credentials-file` flag. Or you can set the path in the `GRUBHUB_EMAIL_DL_CREDENTIALS_FILE` environment variable before running `grubhub-email-dl`.
